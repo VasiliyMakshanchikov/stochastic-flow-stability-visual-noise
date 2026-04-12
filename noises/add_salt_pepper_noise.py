@@ -1,4 +1,3 @@
-import cv2
 import numpy as np
 
 def add_salt_pepper_noise(
