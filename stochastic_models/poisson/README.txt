@@ -1,193 +1,140 @@
-# Poisson Process Modeling for Event Streams
+# Модель Бернулли для потока событий
 
-## Overview
+## Общее описание
 
-In this project, we model the flow of detected objects (e.g., people in video frames) as a **Poisson process**. This provides a simple yet powerful baseline for analyzing how noise in computer vision (CV) systems affects the estimation of stochastic process parameters.
+Модель Бернулли — это стохастическая (вероятностная) модель дискретного потока событий. В отличие от пуассоновского процесса, который работает в непрерывном времени, модель Бернулли описывает события, происходящие в дискретные моменты времени (такты, кадры, секунды).
 
-The pipeline is structured as follows:
-Video → CV Model → Event Extraction → Poisson Model → Parameter Estimation
+В контексте анализа Mall Dataset модель Бернулли применяется для описания потока изменений числа людей в кадре. Каждый кадр видео рассматривается как дискретный момент времени, в который либо происходит изменение (событие), либо нет.
 
-The core idea is to compare the estimated parameters **before and after noise injection**, in order to evaluate robustness.
+## Математическая формулировка
 
----
+### Основные допущения
 
-## Definition of Event
+1. **Дискретность времени**: Время разбито на равные интервалы (кадры)
+2. **Независимость**: Наличие или отсутствие события в кадре не зависит от предыдущих кадров
+3. **Стационарность**: Вероятность события постоянна во времени (если не проверяется иное)
+4. **Ординарность**: В одном кадре может произойти только одно событие (или события объединяются)
 
-An **event** is defined as:
+### Параметры модели
 
-> The appearance of a new object (person) in the frame.
+Пусть:
+- `N` — общее количество кадров в видео
+- `K` — количество кадров, в которых произошло изменение числа людей
+- `p` — вероятность события в одном кадре
 
-After running the CV model, we obtain a sequence of event timestamps:
-t = [t₁, t₂, t₃, ..., tₙ]
+Тогда:
+p = K / N
 
+где `0 ≤ p ≤ 1`.
 
-where:
-- `tᵢ` is the time (or frame index converted to time) when the i-th object appears.
+### Распределение интервалов
 
----
+Интервалы между последовательными событиями имеют **геометрическое распределение**:
+P(X = k) = (1 - p)^(k-1) · p, где k = 1, 2, 3, ...
 
-## Poisson Process: Concept
 
-A Poisson process is a stochastic process that models **random, independent events occurring over time** with a constant average rate.
+Здесь `k` — количество кадров между событиями (включая кадр с событием).
 
-Key assumptions:
-- Events occur **independently**
-- The process is **stationary** (constant rate)
-- No memory (past events do not affect future ones)
+### Характеристики процесса
 
----
+| Характеристика | Формула | Интерпретация |
+|----------------|---------|----------------|
+| Математическое ожидание интервала | `E[X] = 1 / p` | Среднее количество кадров между событиями |
+| Дисперсия интервалов | `Var(X) = (1-p) / p²` | Разброс интервалов |
+| Коэффициент вариации | `CV = √(1-p) / (1-p)` | Мера регулярности потока |
+| Интенсивность потока | `λ = p` (событий/кадр) | Частота событий |
 
-## Mathematical Formulation
+## Связь с пуассоновским процессом
 
-### 1. Event Count Distribution
+Модель Бернулли является дискретным аналогом пуассоновского процесса:
 
-The number of events in a time interval of length `t` follows a Poisson distribution:
+| Характеристика | Пуассон (непрерывный) | Бернулли (дискретный) |
+|----------------|------------------------|------------------------|
+| Время | Непрерывное | Дискретное (кадры) |
+| Параметр | λ (интенсивность) | p (вероятность) |
+| Распределение интервалов | Экспоненциальное | Геометрическое |
+| Условие применимости | Редкие события | Любая вероятность |
 
-\[
-P(N(t)=k) = \frac{(\lambda t)^k e^{-\lambda t}}{k!}
-\]
+При выполнении условий:
+- `p` мало (редкие события)
+- Временной шаг стремится к нулю
 
-where:
-- `N(t)` — number of events in time interval `t`
-- `λ` — intensity (average rate of events)
+Модель Бернулли приближается к пуассоновскому процессу.
 
----
+## Проверка применимости модели
 
-### 2. Interarrival Times (Key Representation)
+Для проверки того, описывает ли модель Бернулли реальный поток событий, используются следующие тесты:
 
-More importantly for practical implementation:
+### 1. Геометрическое распределение интервалов
 
-\[
-\Delta t_i = t_{i+1} - t_i \sim \text{Exponential}(\lambda)
-\]
+Проверяется с помощью хи-квадрат теста. Нулевая гипотеза: интервалы между событиями имеют геометрическое распределение.
 
-This means:
-- Time intervals between consecutive events follow an **exponential distribution**
-- This property is used for parameter estimation
+**Результат**: `p-value > 0.05` → распределение соответствует геометрическому.
 
----
+### 2. Коэффициент вариации (CV)
 
-## Input to the Model
+Для геометрического распределения:
+- При `p → 0`: `CV → 1` (близко к пуассону)
+- При `p = 0.3`: `CV ≈ 1.2`
+- При `p = 0.5`: `CV ≈ 1.4`
 
-The model takes as input:
-event_times = [t₁, t₂, ..., tₙ]
-or equivalently:
-nterarrival_times = [Δt₁, Δt₂, ..., Δtₙ₋₁]
-These are obtained from the CV detection pipeline.
+**Интерпретация**:
+- `CV ≈ 1` → поток близок к случайному
+- `CV > 1` → кластеризация событий
+- `CV < 1` → слишком регулярный поток
 
----
+### 3. Автокорреляция интервалов
 
-## Output of the Model
+Проверяет независимость интервалов. Значение близкое к 0 свидетельствует об отсутствии зависимости между последовательными интервалами.
 
-The Poisson process is fully described by a single parameter:
+### 4. Стационарность (постоянство p)
 
-### Intensity (λ)
+Проверяет, не меняется ли вероятность события во времени с помощью хи-квадрат теста на однородность.
 
-\[
-\lambda = \frac{1}{\mathbb{E}[\Delta t]}
-\]
+## Интерпретация результатов
 
-In practice:
-λ = number_of_events / total_time
+### Параметр p
 
----
+- **p близко к 0** (< 0.1): События редкие. Модель близка к пуассоновской.
+- **p среднее** (0.1-0.5): Умеренная частота событий.
+- **p высокое** (> 0.5): События происходят чаще, чем нет. Стоит рассмотреть дополняющее событие (отсутствие изменений).
 
-## Experimental Setup
+### Пример интерпретации для Mall Dataset
 
-The goal of the experiment is to evaluate how noise affects the estimated parameter `λ`.
+При `p = 0.31`:
+- В 31% кадров происходит изменение числа людей
+- Средний интервал между изменениями: `1/0.31 ≈ 3.2` кадра
+- При FPS = 1 кадр/сек: изменение происходит каждые 3.2 секунды
+- Коэффициент вариации `CV ≈ 1.18` указывает на небольшую кластеризацию событий
 
-### 1. Baseline (No Noise)
-Original Video
-↓
-CV Model
-↓
-event_times_true
-↓
-λ_true
----
+## Ограничения модели
 
-### 2. With Noise
-Noisy Video
-↓
-CV Model
-↓
-event_times_noisy
-↓
-λ_noisy
+1. **Не различает типы событий**: Модель не учитывает, произошло увеличение или уменьшение числа людей
+2. **Предполагает независимость**: Реальные процессы могут иметь память (например, после выхода группы людей вероятность нового выхода временно ниже)
+3. **Стационарность**: В реальности интенсивность потока может меняться (часы пик, обеденное время)
+4. **Дискретность**: Модель не учитывает события, происходящие внутри одного кадра (если FPS низкий)
 
----
+## Рекомендации по применению
 
-## Evaluation Metric
+### Когда модель подходит
 
-The main metric is the deviation in estimated intensity:
+Поток событий выглядит случайным  
+Нет явных периодических паттернов  
+Частота событий примерно постоянна во времени  
+остаточно большое количество событий (> 30-50)  
 
-\[
-\Delta \lambda = |\lambda_{noisy} - \lambda_{true}|
-\]
+### Когда лучше использовать альтернативы
 
-Interpretation:
-- Small Δλ → model is robust to noise
-- Large Δλ → strong sensitivity to noise
+**Нестационарный пуассон** — если интенсивность меняется со временем  
+**Отрицательное биномиальное распределение** — при сильной кластеризации  
+**Марковские цепи** — если есть зависимость от предыдущих состояний  
+**Детерминированные модели** — при строгой периодичности  
 
----
+## Практическое применение
 
-## Effect of Noise
+Модель Бернулли позволяет:
+1. Оценить вероятность изменения числа людей в произвольный момент времени
+2. Предсказывать средние интервалы между изменениями
+3. Генерировать синтетические последовательности событий для моделирования
+4. Сравнивать интенсивность потока в разных сценариях (разные дни, время суток)
 
-Different types of noise affect the process differently:
-
-### 1. False Negatives (Missed Detections)
-- Events are removed
-- Interarrival times increase
-- λ is **underestimated**
-
----
-
-### 2. False Positives (Spurious Detections)
-- Extra events are added
-- Interarrival times decrease
-- λ is **overestimated**
-
----
-
-### 3. Image Noise (e.g., Gaussian, Poisson)
-- Affects detection quality indirectly
-- Leads to both false positives and false negatives
-
----
-
-## Model Validation
-
-To verify whether the Poisson model is appropriate, the following checks should be performed:
-
-1. **Exponentiality of interarrival times**
-2. **Independence of events**
-3. **Stationarity of intensity**
-
-Typical tools:
-- Histogram of interarrival times
-- Kolmogorov–Smirnov test
-- Autocorrelation analysis
-
----
-
-## Summary
-
-| Component        | Description                          |
-|------------------|--------------------------------------|
-| Event            | Appearance of a new object           |
-| Input            | Event timestamps                     |
-| Model            | Poisson process                      |
-| Parameter        | λ (event intensity)                  |
-| Baseline Output  | λ_true                               |
-| Noisy Output     | λ_noisy                              |
-| Goal             | Analyze robustness to noise          |
-
----
-
-## Key Insight
-
-This setup allows us to study:
-
-> How errors in computer vision detection propagate into stochastic process parameter estimation.
-
-This is essential for understanding the reliability of real-world systems that rely on noisy visual data.
